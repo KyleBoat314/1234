@@ -194,6 +194,20 @@
   </div>
 </div>
 
+
+<div class="section" id="paycheckHistorySection">
+  <div class="section-title">PAYCHECK HISTORY</div>
+
+  <div style="padding:20px;">
+    <div id="paycheckHistorySummary"
+         style="margin-bottom:14px;">
+      No imported paychecks yet.
+    </div>
+
+    <div id="paycheckHistory"></div>
+  </div>
+</div>
+
 <div class="actions">
     <button id="exportBtn">Export Backup</button>
     <button id="resetBtn">Reset</button>
@@ -695,6 +709,225 @@ function renderEarningsBreakdown(lines){
   box.innerHTML=html;
 }
 
+
+function projectedPaycheckAtRate(rate){
+  const base=Number(rate)||0;
+
+  const otRate=base*1.5;
+  const dtRate=base*2;
+
+  const regular=
+    (Number(state.w1base)||0)+
+    (Number(state.w2base)||0);
+
+  const overtime=
+    (Number(state.w1ot)||0)+
+    (Number(state.w2ot)||0);
+
+  const doubleTime=
+    (Number(state.w1dt)||0)+
+    (Number(state.w2dt)||0);
+
+  const gross=
+    regular*base+
+    overtime*otRate+
+    doubleTime*dtRate;
+
+  const net=
+    gross*((Number(state.takeHome)||0)/100);
+
+  return {
+    regularHours:Number(regular.toFixed(2)),
+    overtimeHours:Number(overtime.toFixed(2)),
+    doubleTimeHours:Number(doubleTime.toFixed(2)),
+    gross:Number(gross.toFixed(2)),
+    net:Number(net.toFixed(2))
+  };
+}
+
+function paycheckDifference(actual,projected){
+  return Number(
+    ((Number(actual)||0)-(Number(projected)||0)).toFixed(2)
+  );
+}
+
+function signedMoney(v){
+  const n=Number(v)||0;
+
+  if(n>0) return "+$"+money(n);
+  if(n<0) return "-$"+money(Math.abs(n));
+
+  return "$0.00";
+}
+
+function renderPaycheckHistory(){
+  const container=$("paycheckHistory");
+  const summary=$("paycheckHistorySummary");
+
+  if(!container || !summary) return;
+
+  const history=Array.isArray(state.paycheckHistory)
+    ? state.paycheckHistory
+    : [];
+
+  if(history.length===0){
+    summary.textContent="No imported paychecks yet.";
+    container.innerHTML="";
+    return;
+  }
+
+  const latest=history[0];
+
+  const latestNetDifference=
+    paycheckDifference(
+      latest.netPay,
+      latest.projectedNet
+    );
+
+  summary.innerHTML=
+    '<div style="font-weight:800;font-size:18px;margin-bottom:8px;">LATEST PAYCHECK</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'+
+
+      '<div style="background:#eef4f9;padding:12px;border-radius:12px;">'+
+        '<div style="font-size:12px;font-weight:700;">PROJECTED NET</div>'+
+        '<div style="font-size:20px;font-weight:800;">$'+
+          money(latest.projectedNet||0)+
+        '</div>'+
+      '</div>'+
+
+      '<div style="background:#eef7f2;padding:12px;border-radius:12px;">'+
+        '<div style="font-size:12px;font-weight:700;">ACTUAL NET</div>'+
+        '<div style="font-size:20px;font-weight:800;">$'+
+          money(latest.netPay||0)+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+
+    '<div style="margin-top:10px;font-weight:800;">'+
+      'Difference: '+signedMoney(latestNetDifference)+
+    '</div>';
+
+  let html="";
+
+  history.slice(0,12).forEach((check,index)=>{
+    const date=check.importedAt
+      ? new Date(check.importedAt).toLocaleDateString()
+      : "Imported paycheck";
+
+    const grossDiff=
+      paycheckDifference(
+        check.grossPay,
+        check.projectedGross
+      );
+
+    const netDiff=
+      paycheckDifference(
+        check.netPay,
+        check.projectedNet
+      );
+
+    html+=
+      '<details style="margin-top:12px;background:#f4f6f8;border-radius:14px;padding:14px;">'+
+
+        '<summary style="font-weight:800;cursor:pointer;">'+
+          date+
+          ' · $'+money(check.netPay||0)+
+        '</summary>'+
+
+        '<div style="margin-top:12px;">'+
+
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
+
+            '<div>'+
+              '<strong>Hourly rate</strong><br>$'+
+              money(check.hourlyRate||0)+
+            '</div>'+
+
+            '<div>'+
+              '<strong>Total hours</strong><br>'+
+              (check.totalHours||0)+
+            '</div>'+
+
+            '<div>'+
+              '<strong>Gross pay</strong><br>$'+
+              money(check.grossPay||0)+
+            '</div>'+
+
+            '<div>'+
+              '<strong>Net pay</strong><br>$'+
+              money(check.netPay||0)+
+            '</div>'+
+
+            '<div>'+
+              '<strong>Taxes</strong><br>$'+
+              money(check.taxes||0)+
+            '</div>'+
+
+            '<div>'+
+              '<strong>Deductions</strong><br>$'+
+              money(check.deductions||0)+
+            '</div>'+
+
+          '</div>'+
+
+          '<hr style="margin:14px 0;border:0;border-top:1px solid #ddd;">'+
+
+          '<div style="font-weight:800;margin-bottom:6px;">ACTUAL VS PROJECTED</div>'+
+
+          '<div>Projected gross: $'+money(check.projectedGross||0)+'</div>'+
+          '<div>Actual gross: $'+money(check.grossPay||0)+'</div>'+
+          '<div><strong>Gross difference: '+
+            signedMoney(grossDiff)+
+          '</strong></div>'+
+
+          '<div style="margin-top:8px;">Projected net: $'+
+            money(check.projectedNet||0)+
+          '</div>'+
+
+          '<div>Actual net: $'+
+            money(check.netPay||0)+
+          '</div>'+
+
+          '<div><strong>Net difference: '+
+            signedMoney(netDiff)+
+          '</strong></div>'+
+
+          '<div style="margin-top:14px;font-weight:800;">EARNINGS</div>'+
+
+          (Array.isArray(check.earningsLines)
+            ? check.earningsLines.map(line=>{
+                const rate=line.rate!=null
+                  ? "$"+Number(line.rate).toFixed(3)
+                    .replace(/0+$/,"")
+                    .replace(/\.$/,"")
+                  : "—";
+
+                const hrs=line.hours!=null
+                  ? Number(line.hours).toFixed(2)
+                    .replace(/\.?0+$/,"")
+                  : "—";
+
+                const earn=line.earnings!=null
+                  ? "$"+money(line.earnings)
+                  : "—";
+
+                return '<div style="display:grid;grid-template-columns:1.5fr .8fr .6fr .9fr;gap:5px;padding:4px 0;border-bottom:1px solid #ddd;">'+
+                  '<div>'+line.description+'</div>'+
+                  '<div>'+rate+'</div>'+
+                  '<div>'+hrs+' h</div>'+
+                  '<div style="text-align:right;">'+earn+'</div>'+
+                '</div>';
+              }).join("")
+            : ""
+          )+
+
+        '</div>'+
+      '</details>';
+  });
+
+  container.innerHTML=html;
+}
+
 function handlePaycheckOcr(text){
   console.log("PAYCHECK OCR:",text);
 
@@ -811,64 +1044,111 @@ $("importPaycheckBtn").onclick=()=>{
 
 $("applyPaycheckBtn").onclick=()=>{
   const hourlyRate=num($("importHourlyRate").value);
+
   const regular=num($("importRegularHours").value);
   const overtime=num($("importOtHours").value);
   const doubleTime=num($("importDtHours").value);
   const vacation=num($("importVacationHours").value);
   const adjustment=num($("importAdjustmentHours").value);
   const totalHours=num($("importTotalHours").value);
+
   const gross=num($("importGross").value);
   const taxes=num($("importTaxes").value);
   const deductions=num($("importDeductions").value);
   const net=num($("importNet").value);
 
   /*
-    Update the normal pay setting from the paycheck,
-    but DO NOT overwrite Week 1 or Week 2 planning hours.
+    Capture the planning forecast BEFORE changing anything.
+    Week 1 / Week 2 hours are left completely untouched.
   */
-  if(hourlyRate>0){
-    state.baseRate=hourlyRate;
-  }
+  const projected=
+    projectedPaycheckAtRate(
+      hourlyRate>0
+        ? hourlyRate
+        : state.baseRate
+    );
 
-  /*
-    Store actual paycheck information separately from
-    projected/planned paycheck information.
-  */
-  state.actualPaycheck={
+  const paycheck={
+    id:Date.now(),
+
+    importedAt:Date.now(),
+
     hourlyRate:hourlyRate,
+
     regularHours:regular,
     overtimeHours:overtime,
     doubleTimeHours:doubleTime,
     vacationHours:vacation,
     overtimeAdjustmentHours:adjustment,
     totalHours:totalHours,
+
     grossPay:gross,
     taxes:taxes,
     deductions:deductions,
     netPay:net,
-    earningsLines:earningsLines,
-    importedAt:Date.now()
+
+    projectedRegularHours:projected.regularHours,
+    projectedOvertimeHours:projected.overtimeHours,
+    projectedDoubleTimeHours:projected.doubleTimeHours,
+    projectedGross:projected.gross,
+    projectedNet:projected.net,
+
+    earningsLines:
+      typeof earningsLines!=="undefined"
+        ? earningsLines
+        : []
   };
 
+  if(!Array.isArray(state.paycheckHistory)){
+    state.paycheckHistory=[];
+  }
+
+  state.paycheckHistory.unshift(paycheck);
+
   /*
-    Older importer versions used these to override
-    calculated gross/net. Remove them so Week 1/Week 2
-    remain the planning forecast.
+    Keep the most recent 50 imported paychecks.
   */
+  state.paycheckHistory=
+    state.paycheckHistory.slice(0,50);
+
+  /*
+    Update current planning rate from the paycheck.
+  */
+  if(hourlyRate>0){
+    state.baseRate=hourlyRate;
+
+    const baseField=$("baseRate");
+    if(baseField){
+      baseField.value=hourlyRate;
+    }
+  }
+
+  /*
+    Keep a convenient reference to the newest check.
+  */
+  state.actualPaycheck=paycheck;
+
   delete state.importedGross;
   delete state.importedNet;
 
   save();
   calc();
+  renderPaycheckHistory();
+
+  const netDifference=
+    paycheckDifference(
+      net,
+      projected.net
+    );
 
   $("paycheckImportStatus").textContent=
-    "✓ Actual paycheck saved. Hourly rate updated to $"+
-    money(hourlyRate)+
-    ". Planning hours were not changed.";
+    "✓ Paycheck saved. Actual net was "+
+    signedMoney(netDifference)+
+    " vs projected. Planning hours were not changed.";
 };
 
 
-renderExpenses(); calc();
+renderExpenses(); calc(); renderPaycheckHistory();
 
 </script>
 </body>
