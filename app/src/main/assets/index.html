@@ -764,6 +764,16 @@ function projectedPaycheckAtRate(rate){
   };
 }
 
+
+function effectiveTakeHomePercent(gross,net){
+  const g=Number(gross)||0;
+  const n=Number(net)||0;
+
+  if(g<=0) return null;
+
+  return Number(((n/g)*100).toFixed(2));
+}
+
 function paycheckDifference(actual,projected){
   return Number(
     ((Number(actual)||0)-(Number(projected)||0)).toFixed(2)
