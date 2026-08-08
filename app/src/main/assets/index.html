@@ -336,43 +336,104 @@ function numbersIn(text){
  The hours number is therefore normally the
  second-to-last numeric value in the row.
 */
-function rowHours(lines, type){
-  let total=0;
-  let found=false;
 
-  for(const original of lines){
-    const line=original.trim();
-    const lower=line.toLowerCase();
+function parseBoeingHours(text){
+  const lines=text
+    .replace(/\r/g,"")
+    .split("\n")
+    .map(x=>x.trim())
+    .filter(Boolean);
 
-    let match=false;
+  /*
+    Boeing/ML Kit reads this table vertically.
 
-    if(type==="regular")
-      match=/^regular\s+hours\b/i.test(line);
+    Description:
+      Regular Hours
+      Regular Hours
+      Vacation
+      Overtime
+      Double Time
+      Overtime Adjustment
 
-    if(type==="overtime")
-      match=/^overtime\b/i.test(line) &&
-            !/adjustment/i.test(line);
+    Hours:
+      8.0
+      38.6
+      1.4
+      11.9
+      8.0
+      68.9
 
-    if(type==="double")
-      match=/^double\s*time\b/i.test(line);
+    The final 68.9 is TOTAL hours, not the
+    Overtime Adjustment value.
+  */
 
-    if(type==="vacation")
-      match=/^vacation\b/i.test(line);
+  let hoursIndex=-1;
 
-    if(type==="adjustment")
-      match=/^overtime\s+adjustment\b/i.test(line);
-
-    if(!match) continue;
-
-    const nums=numbersIn(line);
-
-    if(nums.length>=2){
-      total+=nums[nums.length-2];
-      found=true;
+  for(let i=0;i<lines.length;i++){
+    if(/^hours$/i.test(lines[i])){
+      hoursIndex=i;
+      break;
     }
   }
 
-  return found ? Number(total.toFixed(2)) : null;
+  if(hoursIndex===-1){
+    return {
+      regular:null,
+      overtime:null,
+      doubleTime:null,
+      vacation:null,
+      adjustment:null,
+      total:null
+    };
+  }
+
+  const values=[];
+
+  for(let i=hoursIndex+1;i<lines.length;i++){
+    const line=lines[i];
+
+    if(/^(current|account type|checking|earnings|taxes|description)$/i.test(line))
+      break;
+
+    if(/^\d+(?:\.\d+)?$/.test(line)){
+      const n=Number(line);
+      if(Number.isFinite(n)) values.push(n);
+    }
+
+    if(values.length>=10) break;
+  }
+
+  /*
+    Expected OCR sequence:
+      0 = Regular #1
+      1 = Regular #2
+      2 = Vacation
+      3 = Overtime
+      4 = Double Time
+      5 = Total
+
+    Adjustment is absent from this particular OCR scan.
+  */
+
+  if(values.length>=6){
+    return {
+      regular:Number((values[0]+values[1]).toFixed(2)),
+      vacation:values[2],
+      overtime:values[3],
+      doubleTime:values[4],
+      adjustment:null,
+      total:values[5]
+    };
+  }
+
+  return {
+    regular:null,
+    overtime:null,
+    doubleTime:null,
+    vacation:null,
+    adjustment:null,
+    total:null
+  };
 }
 
 function handlePaycheckOcr(text){
@@ -389,53 +450,13 @@ function handlePaycheckOcr(text){
     .map(x=>x.trim())
     .filter(Boolean);
 
-  let regular=rowHours(lines,"regular");
-  let overtime=rowHours(lines,"overtime");
-  let doubleTime=rowHours(lines,"double");
-  let vacation=rowHours(lines,"vacation");
-  let adjustment=rowHours(lines,"adjustment");
+  const boeingHours=parseBoeingHours(cleaned);
 
-  /*
-   Fallback searches for cases where OCR merges table cells
-   differently but keeps the row description near its values.
-  */
-  function fallbackHours(label){
-    const re=new RegExp(label+"[^\\n]{0,100}","ig");
-    const matches=[...cleaned.matchAll(re)];
-
-    let total=0;
-    let found=false;
-
-    for(const m of matches){
-      if(/overtime/i.test(label) &&
-         /adjustment/i.test(m[0]) &&
-         !/adjustment/i.test(label)) continue;
-
-      const nums=numbersIn(m[0]);
-
-      if(nums.length>=2){
-        total+=nums[nums.length-2];
-        found=true;
-      }
-    }
-
-    return found ? Number(total.toFixed(2)) : null;
-  }
-
-  if(regular===null)
-    regular=fallbackHours("regular\\s+hours");
-
-  if(overtime===null)
-    overtime=fallbackHours("overtime");
-
-  if(doubleTime===null)
-    doubleTime=fallbackHours("double\\s*time");
-
-  if(vacation===null)
-    vacation=fallbackHours("vacation");
-
-  if(adjustment===null)
-    adjustment=fallbackHours("overtime\\s+adjustment");
+  let regular=boeingHours.regular;
+  let overtime=boeingHours.overtime;
+  let doubleTime=boeingHours.doubleTime;
+  let vacation=boeingHours.vacation;
+  let adjustment=boeingHours.adjustment;
 
   const gross=paycheckNumber(cleaned,[
     /total\s+gross[\s\S]{0,80}?([0-9,]+\.\d{2})/i,
@@ -463,17 +484,7 @@ function handlePaycheckOcr(text){
     net=Number((gross-taxes-deductions).toFixed(2));
   }
 
-  const components=[
-    regular,
-    overtime,
-    doubleTime,
-    vacation,
-    adjustment
-  ];
-
-  const totalHours=components.some(v=>v!==null)
-    ? Number(components.reduce((a,v)=>a+(v||0),0).toFixed(2))
-    : null;
+  const totalHours=boeingHours.total;
 
   $("importRegularHours").value=regular ?? "";
   $("importOtHours").value=overtime ?? "";
