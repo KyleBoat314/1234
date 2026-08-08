@@ -121,6 +121,11 @@
          style="display:none;margin-top:18px;">
 
       <div class="row">
+        <div class="label">Hourly rate</div>
+        <input id="importHourlyRate" type="number" step="0.01">
+      </div>
+
+      <div class="row">
         <div class="label">Regular hours</div>
         <input id="importRegularHours" type="number" step="0.01">
       </div>
@@ -436,6 +441,62 @@ function parseBoeingHours(text){
   };
 }
 
+
+function parseBoeingBaseRate(text){
+  const lines=text
+    .replace(/\r/g,"")
+    .split("\n")
+    .map(x=>x.trim())
+    .filter(Boolean);
+
+  let rateIndex=-1;
+
+  for(let i=0;i<lines.length;i++){
+    if(/^rate$/i.test(lines[i])){
+      rateIndex=i;
+      break;
+    }
+  }
+
+  if(rateIndex===-1) return null;
+
+  const rates=[];
+
+  for(let i=rateIndex+1;i<lines.length;i++){
+    const line=lines[i];
+
+    if(/^(fed taxable gross|after-tax deductions|hours|earnings)$/i.test(line))
+      break;
+
+    if(/^\d+\.\d{4,6}$/.test(line)){
+      const n=Number(line);
+      if(Number.isFinite(n)) rates.push(n);
+    }
+
+    if(rates.length>=6) break;
+  }
+
+  /*
+    Boeing OCR order follows the Description column.
+
+    First rates normally correspond to:
+      Regular Hours
+      Regular Hours
+
+    If a paycheck spans a wage change, use the
+    higher/current regular rate.
+  */
+  if(rates.length>=2){
+    return Number(Math.max(rates[0],rates[1]).toFixed(2));
+  }
+
+  if(rates.length===1){
+    return Number(rates[0].toFixed(2));
+  }
+
+  return null;
+}
+
 function handlePaycheckOcr(text){
   console.log("PAYCHECK OCR:",text);
 
@@ -451,6 +512,7 @@ function handlePaycheckOcr(text){
     .filter(Boolean);
 
   const boeingHours=parseBoeingHours(cleaned);
+  const baseRate=parseBoeingBaseRate(cleaned);
 
   let regular=boeingHours.regular;
   let overtime=boeingHours.overtime;
@@ -486,6 +548,7 @@ function handlePaycheckOcr(text){
 
   const totalHours=boeingHours.total;
 
+  $("importHourlyRate").value=baseRate ?? "";
   $("importRegularHours").value=regular ?? "";
   $("importOtHours").value=overtime ?? "";
   $("importDtHours").value=doubleTime ?? "";
@@ -500,7 +563,7 @@ function handlePaycheckOcr(text){
   $("paycheckPreview").style.display="block";
 
   const found=[
-    regular,overtime,doubleTime,vacation,
+    baseRate,regular,overtime,doubleTime,vacation,
     adjustment,totalHours,gross,taxes,
     deductions,net
   ].filter(v=>v!==null).length;
@@ -523,33 +586,60 @@ $("importPaycheckBtn").onclick=()=>{
 };
 
 $("applyPaycheckBtn").onclick=()=>{
+  const hourlyRate=num($("importHourlyRate").value);
   const regular=num($("importRegularHours").value);
   const overtime=num($("importOtHours").value);
   const doubleTime=num($("importDtHours").value);
+  const vacation=num($("importVacationHours").value);
+  const adjustment=num($("importAdjustmentHours").value);
+  const totalHours=num($("importTotalHours").value);
   const gross=num($("importGross").value);
+  const taxes=num($("importTaxes").value);
+  const deductions=num($("importDeductions").value);
   const net=num($("importNet").value);
 
   /*
-   Imported hours represent the whole pay period.
-   Store them in Week 1 and clear Week 2 so they
-   are not counted twice.
+    Update the normal pay setting from the paycheck,
+    but DO NOT overwrite Week 1 or Week 2 planning hours.
   */
-  state.w1base=regular;
-  state.w1ot=overtime;
-  state.w1dt=doubleTime;
+  if(hourlyRate>0){
+    state.baseRate=hourlyRate;
+  }
 
-  state.w2base=0;
-  state.w2ot=0;
-  state.w2dt=0;
+  /*
+    Store actual paycheck information separately from
+    projected/planned paycheck information.
+  */
+  state.actualPaycheck={
+    hourlyRate:hourlyRate,
+    regularHours:regular,
+    overtimeHours:overtime,
+    doubleTimeHours:doubleTime,
+    vacationHours:vacation,
+    overtimeAdjustmentHours:adjustment,
+    totalHours:totalHours,
+    grossPay:gross,
+    taxes:taxes,
+    deductions:deductions,
+    netPay:net,
+    importedAt:Date.now()
+  };
 
-  state.importedGross=gross;
-  state.importedNet=net;
+  /*
+    Older importer versions used these to override
+    calculated gross/net. Remove them so Week 1/Week 2
+    remain the planning forecast.
+  */
+  delete state.importedGross;
+  delete state.importedNet;
 
   save();
   calc();
 
   $("paycheckImportStatus").textContent=
-    "✓ Paycheck applied to budget.";
+    "✓ Actual paycheck saved. Hourly rate updated to $"+
+    money(hourlyRate)+
+    ". Planning hours were not changed.";
 };
 
 
