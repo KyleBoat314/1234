@@ -710,6 +710,7 @@ function renderEarningsBreakdown(lines){
 }
 
 
+
 function projectedPaycheckAtRate(rate){
   const base=Number(rate)||0;
 
@@ -733,15 +734,33 @@ function projectedPaycheckAtRate(rate){
     overtime*otRate+
     doubleTime*dtRate;
 
+  let takeHomePercent=Number(state.takeHome)||0;
+
+  if(Array.isArray(state.paycheckHistory) &&
+     state.paycheckHistory.length>0){
+
+    const learned=state.paycheckHistory
+      .map(x=>Number(x.effectiveTakeHomePercent)||0)
+      .filter(x=>x>0 && x<=100);
+
+    if(learned.length>0){
+      const recent=learned.slice(0,6);
+
+      takeHomePercent=
+        recent.reduce((a,b)=>a+b,0)/recent.length;
+    }
+  }
+
   const net=
-    gross*((Number(state.takeHome)||0)/100);
+    gross*(takeHomePercent/100);
 
   return {
     regularHours:Number(regular.toFixed(2)),
     overtimeHours:Number(overtime.toFixed(2)),
     doubleTimeHours:Number(doubleTime.toFixed(2)),
     gross:Number(gross.toFixed(2)),
-    net:Number(net.toFixed(2))
+    net:Number(net.toFixed(2)),
+    takeHomePercent:Number(takeHomePercent.toFixed(2))
   };
 }
 
@@ -759,6 +778,7 @@ function signedMoney(v){
 
   return "$0.00";
 }
+
 
 function renderPaycheckHistory(){
   const container=$("paycheckHistory");
@@ -778,20 +798,27 @@ function renderPaycheckHistory(){
 
   const latest=history[0];
 
-  const latestNetDifference=
-    paycheckDifference(
-      latest.netPay,
-      latest.projectedNet
+  const latestEffective=
+    latest.effectiveTakeHomePercent ??
+    effectiveTakeHomePercent(
+      latest.grossPay,
+      latest.netPay
+    );
+
+  const nextProjection=
+    projectedPaycheckAtRate(
+      Number(state.baseRate)||latest.hourlyRate||0
     );
 
   summary.innerHTML=
-    '<div style="font-weight:800;font-size:18px;margin-bottom:8px;">LATEST PAYCHECK</div>'+
+    '<div style="font-weight:800;font-size:18px;margin-bottom:10px;">LATEST PAYCHECK</div>'+
+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'+
 
       '<div style="background:#eef4f9;padding:12px;border-radius:12px;">'+
-        '<div style="font-size:12px;font-weight:700;">PROJECTED NET</div>'+
+        '<div style="font-size:12px;font-weight:700;">ACTUAL GROSS</div>'+
         '<div style="font-size:20px;font-weight:800;">$'+
-          money(latest.projectedNet||0)+
+          money(latest.grossPay||0)+
         '</div>'+
       '</div>'+
 
@@ -801,10 +828,33 @@ function renderPaycheckHistory(){
           money(latest.netPay||0)+
         '</div>'+
       '</div>'+
+
+      '<div style="background:#f8f3ea;padding:12px;border-radius:12px;">'+
+        '<div style="font-size:12px;font-weight:700;">TAXES</div>'+
+        '<div style="font-size:20px;font-weight:800;">$'+
+          money(latest.taxes||0)+
+        '</div>'+
+      '</div>'+
+
+      '<div style="background:#f5f1f7;padding:12px;border-radius:12px;">'+
+        '<div style="font-size:12px;font-weight:700;">DEDUCTIONS</div>'+
+        '<div style="font-size:20px;font-weight:800;">$'+
+          money(latest.deductions||0)+
+        '</div>'+
+      '</div>'+
+
     '</div>'+
 
-    '<div style="margin-top:10px;font-weight:800;">'+
-      'Difference: '+signedMoney(latestNetDifference)+
+    '<div style="margin-top:12px;font-weight:800;">'+
+      'Effective take-home: '+
+      (latestEffective!==null
+        ? Number(latestEffective).toFixed(2)+'%'
+        : '—')+
+    '</div>'+
+
+    '<div style="margin-top:8px;font-weight:800;">'+
+      'Next projected net: $'+
+      money(nextProjection.net||0)+
     '</div>';
 
   let html="";
@@ -814,16 +864,11 @@ function renderPaycheckHistory(){
       ? new Date(check.importedAt).toLocaleDateString()
       : "Imported paycheck";
 
-    const grossDiff=
-      paycheckDifference(
+    const effective=
+      check.effectiveTakeHomePercent ??
+      effectiveTakeHomePercent(
         check.grossPay,
-        check.projectedGross
-      );
-
-    const netDiff=
-      paycheckDifference(
-        check.netPay,
-        check.projectedNet
+        check.netPay
       );
 
     html+=
@@ -868,29 +913,14 @@ function renderPaycheckHistory(){
               money(check.deductions||0)+
             '</div>'+
 
+            '<div>'+
+              '<strong>Take-home %</strong><br>'+
+              (effective!==null
+                ? Number(effective).toFixed(2)+'%'
+                : '—')+
+            '</div>'+
+
           '</div>'+
-
-          '<hr style="margin:14px 0;border:0;border-top:1px solid #ddd;">'+
-
-          '<div style="font-weight:800;margin-bottom:6px;">ACTUAL VS PROJECTED</div>'+
-
-          '<div>Projected gross: $'+money(check.projectedGross||0)+'</div>'+
-          '<div>Actual gross: $'+money(check.grossPay||0)+'</div>'+
-          '<div><strong>Gross difference: '+
-            signedMoney(grossDiff)+
-          '</strong></div>'+
-
-          '<div style="margin-top:8px;">Projected net: $'+
-            money(check.projectedNet||0)+
-          '</div>'+
-
-          '<div>Actual net: $'+
-            money(check.netPay||0)+
-          '</div>'+
-
-          '<div><strong>Net difference: '+
-            signedMoney(netDiff)+
-          '</strong></div>'+
 
           '<div style="margin-top:14px;font-weight:800;">EARNINGS</div>'+
 
@@ -1057,20 +1087,11 @@ $("applyPaycheckBtn").onclick=()=>{
   const deductions=num($("importDeductions").value);
   const net=num($("importNet").value);
 
-  /*
-    Capture the planning forecast BEFORE changing anything.
-    Week 1 / Week 2 hours are left completely untouched.
-  */
-  const projected=
-    projectedPaycheckAtRate(
-      hourlyRate>0
-        ? hourlyRate
-        : state.baseRate
-    );
+  const effective=
+    effectiveTakeHomePercent(gross,net);
 
   const paycheck={
     id:Date.now(),
-
     importedAt:Date.now(),
 
     hourlyRate:hourlyRate,
@@ -1087,11 +1108,7 @@ $("applyPaycheckBtn").onclick=()=>{
     deductions:deductions,
     netPay:net,
 
-    projectedRegularHours:projected.regularHours,
-    projectedOvertimeHours:projected.overtimeHours,
-    projectedDoubleTimeHours:projected.doubleTimeHours,
-    projectedGross:projected.gross,
-    projectedNet:projected.net,
+    effectiveTakeHomePercent:effective,
 
     earningsLines:
       typeof earningsLines!=="undefined"
@@ -1105,27 +1122,44 @@ $("applyPaycheckBtn").onclick=()=>{
 
   state.paycheckHistory.unshift(paycheck);
 
-  /*
-    Keep the most recent 50 imported paychecks.
-  */
   state.paycheckHistory=
     state.paycheckHistory.slice(0,50);
 
-  /*
-    Update current planning rate from the paycheck.
-  */
   if(hourlyRate>0){
     state.baseRate=hourlyRate;
 
     const baseField=$("baseRate");
+
     if(baseField){
       baseField.value=hourlyRate;
     }
   }
 
   /*
-    Keep a convenient reference to the newest check.
+    Learn take-home % from the most recent checks.
+    Average up to the latest 6 actual paychecks.
   */
+  const learned=state.paycheckHistory
+    .map(x=>Number(x.effectiveTakeHomePercent)||0)
+    .filter(x=>x>0 && x<=100)
+    .slice(0,6);
+
+  if(learned.length>0){
+    state.takeHome=
+      Number(
+        (
+          learned.reduce((a,b)=>a+b,0)/
+          learned.length
+        ).toFixed(2)
+      );
+
+    const takeHomeField=$("takeHome");
+
+    if(takeHomeField){
+      takeHomeField.value=state.takeHome;
+    }
+  }
+
   state.actualPaycheck=paycheck;
 
   delete state.importedGross;
@@ -1135,16 +1169,8 @@ $("applyPaycheckBtn").onclick=()=>{
   calc();
   renderPaycheckHistory();
 
-  const netDifference=
-    paycheckDifference(
-      net,
-      projected.net
-    );
-
   $("paycheckImportStatus").textContent=
-    "✓ Paycheck saved. Actual net was "+
-    signedMoney(netDifference)+
-    " vs projected. Planning hours were not changed.";
+    "✓ Paycheck saved. Hourly rate and take-home estimate updated from actual payroll. Planning hours were not changed.";
 };
 
 
