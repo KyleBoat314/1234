@@ -175,6 +175,11 @@
         <input id="importNet" type="number" step="0.01">
       </div>
 
+      <div id="paycheckEarningsBreakdown"
+           style="margin-top:18px;padding:14px;border-radius:12px;
+                  background:#f4f6f8;font-size:14px;line-height:1.5;">
+      </div>
+
       <button id="applyPaycheckBtn" class="add-btn"
               style="width:100%;margin-top:14px;padding:14px;">
         Apply Paycheck
@@ -497,6 +502,193 @@ function parseBoeingBaseRate(text){
   return null;
 }
 
+
+function parseBoeingEarnings(text){
+  const lines=text
+    .replace(/\r/g,"")
+    .split("\n")
+    .map(x=>x.trim())
+    .filter(Boolean);
+
+  const descriptions=[
+    "Regular Hours",
+    "Regular Hours",
+    "Vacation",
+    "Overtime",
+    "Double Time",
+    "Overtime Adjustment"
+  ];
+
+  // -------- Rates --------
+  let rates=[];
+
+  const rateIndex=lines.findIndex(x=>/^rate$/i.test(x));
+
+  if(rateIndex>=0){
+    for(let i=rateIndex+1;i<lines.length;i++){
+      const line=lines[i];
+
+      if(/^(hours|fed taxable gross|after-tax deductions)$/i.test(line))
+        break;
+
+      if(/^\d+\.\d{4,6}$/.test(line)){
+        const n=Number(line);
+        if(Number.isFinite(n)) rates.push(n);
+      }
+
+      if(rates.length>=6) break;
+    }
+  }
+
+  // -------- Hours --------
+  let hourValues=[];
+
+  const hoursIndex=lines.findIndex(x=>/^hours$/i.test(x));
+
+  if(hoursIndex>=0){
+    for(let i=hoursIndex+1;i<lines.length;i++){
+      const line=lines[i];
+
+      if(/^(current|account type|checking|earnings)$/i.test(line))
+        break;
+
+      if(/^\d+(?:\.\d+)?$/.test(line)){
+        const n=Number(line);
+        if(Number.isFinite(n)) hourValues.push(n);
+      }
+
+      if(hourValues.length>=10) break;
+    }
+  }
+
+  /*
+    OCR normally gives:
+      8.0
+      38.6
+      1.4
+      11.9
+      8.0
+      68.9
+
+    68.9 is TOTAL, so adjustment hours are absent.
+  */
+  let totalHours=null;
+  let hours=[];
+
+  if(hourValues.length>=6){
+    hours=[
+      hourValues[0],
+      hourValues[1],
+      hourValues[2],
+      hourValues[3],
+      hourValues[4],
+      null
+    ];
+
+    totalHours=hourValues[5];
+  }
+
+  // -------- Earnings --------
+  /*
+    ML Kit is reading the earnings amounts at the start
+    of lines such as:
+
+      304.00Fed Medicare
+      1,553.65|Fed Social Sec
+      56.35 WA FLVEE
+      718.46 WA LTO/EE
+      644.00WA MLVEE
+      59.27 WA WA INDUSTRIAL
+  */
+  let earnings=[];
+
+  const earningsDescIndex=lines.findIndex(
+    x=>/^earnings\s+description$/i.test(x)
+  );
+
+  if(earningsDescIndex>=0){
+    for(let i=earningsDescIndex+1;i<lines.length;i++){
+      const line=lines[i];
+
+      const m=line.match(/^([0-9,]+\.\d{2})/);
+
+      if(m){
+        const n=Number(m[1].replace(/,/g,""));
+
+        if(Number.isFinite(n)){
+          earnings.push(n);
+        }
+      }
+
+      if(earnings.length>=6) break;
+    }
+  }
+
+  const result=[];
+
+  for(let i=0;i<6;i++){
+    const rate=rates[i] ?? null;
+    let hrs=hours[i] ?? null;
+    const earn=earnings[i] ?? null;
+
+    /*
+      OT Adjustment hour may be missed by OCR.
+      If rate and earnings are present, safely infer it.
+    */
+    if(i===5 && hrs===null && rate && earn){
+      const inferred=earn/rate;
+
+      if(inferred>0 && inferred<24){
+        hrs=Number(inferred.toFixed(2));
+      }
+    }
+
+    result.push({
+      description:descriptions[i],
+      rate:rate,
+      hours:hrs,
+      earnings:earn
+    });
+  }
+
+  return {
+    lines:result,
+    totalHours:totalHours
+  };
+}
+
+function renderEarningsBreakdown(lines){
+  const box=$("paycheckEarningsBreakdown");
+
+  if(!box) return;
+
+  let html='<div style="font-weight:800;margin-bottom:8px;">EARNINGS BREAKDOWN</div>';
+
+  for(const line of lines){
+    const rate=line.rate!==null
+      ? "$"+Number(line.rate).toFixed(3).replace(/0+$/,"").replace(/\.$/,"")
+      : "—";
+
+    const hours=line.hours!==null
+      ? Number(line.hours).toFixed(2).replace(/\.?0+$/,"")
+      : "—";
+
+    const earnings=line.earnings!==null
+      ? "$"+money(line.earnings)
+      : "—";
+
+    html+=
+      '<div style="display:grid;grid-template-columns:1.5fr .9fr .7fr 1fr;gap:6px;padding:5px 0;border-bottom:1px solid #ddd;">'+
+      '<div>'+line.description+'</div>'+
+      '<div>'+rate+'</div>'+
+      '<div>'+hours+' h</div>'+
+      '<div style="text-align:right;">'+earnings+'</div>'+
+      '</div>';
+  }
+
+  box.innerHTML=html;
+}
+
 function handlePaycheckOcr(text){
   console.log("PAYCHECK OCR:",text);
 
@@ -511,14 +703,39 @@ function handlePaycheckOcr(text){
     .map(x=>x.trim())
     .filter(Boolean);
 
-  const boeingHours=parseBoeingHours(cleaned);
-  const baseRate=parseBoeingBaseRate(cleaned);
+  const boeingEarnings=parseBoeingEarnings(cleaned);
 
-  let regular=boeingHours.regular;
-  let overtime=boeingHours.overtime;
-  let doubleTime=boeingHours.doubleTime;
-  let vacation=boeingHours.vacation;
-  let adjustment=boeingHours.adjustment;
+  const earningsLines=boeingEarnings.lines;
+
+  const regularLines=earningsLines.filter(
+    x=>x.description==="Regular Hours"
+  );
+
+  const regular=Number(
+    regularLines.reduce((sum,x)=>sum+(x.hours||0),0).toFixed(2)
+  );
+
+  const vacation=
+    earningsLines.find(x=>x.description==="Vacation")?.hours ?? null;
+
+  const overtime=
+    earningsLines.find(x=>x.description==="Overtime")?.hours ?? null;
+
+  const doubleTime=
+    earningsLines.find(x=>x.description==="Double Time")?.hours ?? null;
+
+  const adjustment=
+    earningsLines.find(x=>x.description==="Overtime Adjustment")?.hours ?? null;
+
+  const totalHours=boeingEarnings.totalHours;
+
+  const regularRates=regularLines
+    .map(x=>x.rate)
+    .filter(x=>x!==null);
+
+  const baseRate=regularRates.length
+    ? Number(Math.max(...regularRates).toFixed(2))
+    : parseBoeingBaseRate(cleaned);
 
   const gross=paycheckNumber(cleaned,[
     /total\s+gross[\s\S]{0,80}?([0-9,]+\.\d{2})/i,
@@ -546,7 +763,6 @@ function handlePaycheckOcr(text){
     net=Number((gross-taxes-deductions).toFixed(2));
   }
 
-  const totalHours=boeingHours.total;
 
   $("importHourlyRate").value=baseRate ?? "";
   $("importRegularHours").value=regular ?? "";
@@ -559,6 +775,8 @@ function handlePaycheckOcr(text){
   $("importTaxes").value=taxes ?? "";
   $("importDeductions").value=deductions ?? "";
   $("importNet").value=net ?? "";
+
+  renderEarningsBreakdown(earningsLines);
 
   $("paycheckPreview").style.display="block";
 
@@ -622,6 +840,7 @@ $("applyPaycheckBtn").onclick=()=>{
     taxes:taxes,
     deductions:deductions,
     netPay:net,
+    earningsLines:earningsLines,
     importedAt:Date.now()
   };
 
