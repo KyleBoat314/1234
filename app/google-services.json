@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "239266208323",
+    "project_id": "boat-house-budget",
+    "storage_bucket": "boat-house-budget.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:239266208323:android:fa9f41aeabcac6e68952f6",
+        "android_client_info": {
+          "package_name": "com.boathouse.budget"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDLb6YerQKsMA0HNv7Xcflrm9m62jy-o4M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

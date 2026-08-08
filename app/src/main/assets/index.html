@@ -124,7 +124,14 @@ const $=id=>document.getElementById(id);
 const num=v=>Number(v)||0;
 const money=v=>num(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 
-function save(){ localStorage.setItem("boatHouseBudgetState",JSON.stringify(state)); }
+function save(){
+  const json = JSON.stringify(state);
+  localStorage.setItem("boatHouseBudgetState", json);
+
+  if(window.Android && Android.syncBudget){
+    Android.syncBudget(json);
+  }
+}
 
 function bind(id,key){
   $(id).value=state[key];
@@ -180,6 +187,39 @@ $("exportBtn").onclick=()=>{
 $("resetBtn").onclick=()=>{
   if(confirm("Reset all values to the original defaults?")){state=structuredClone(defaults);save();location.reload();}
 };
+
+
+
+function applyCloudState(json){
+  try {
+    const incoming = JSON.parse(json);
+
+    if(!incoming || typeof incoming !== "object") return;
+
+    state = incoming;
+    localStorage.setItem("boatHouseBudgetState", JSON.stringify(state));
+
+    const fields = [
+      "baseRate","takeHome",
+      "w1base","w1ot","w1dt",
+      "w2base","w2ot","w2dt",
+      "childSupport"
+    ];
+
+    fields.forEach(id => {
+      const el = document.getElementById(id);
+      if(el && state[id] !== undefined){
+        el.value = state[id];
+      }
+    });
+
+    renderExpenses();
+    calc();
+
+  } catch(err) {
+    console.error("Cloud sync error", err);
+  }
+}
 
 renderExpenses(); calc();
 
