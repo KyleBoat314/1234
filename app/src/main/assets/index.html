@@ -292,6 +292,30 @@ function calc(){
     ? Number(state.importedNet)
     : gross*(state.takeHome/100);
   const income=net+state.childSupport;
+
+  /*
+    Tithing is always 10% of this paycheck's gross pay.
+  */
+  const tithingIndex=state.expenses.findIndex(
+    e=>String(e[0]).trim().toLowerCase()==="tithing"
+  );
+
+  if(tithingIndex>=0){
+    const tithing=Number((gross*0.10).toFixed(2));
+
+    state.expenses[tithingIndex][1]=tithing;
+
+    const expenseBox=$("expenses");
+
+    if(expenseBox &&
+       expenseBox.children[tithingIndex] &&
+       expenseBox.children[tithingIndex].children[1]){
+
+      expenseBox.children[tithingIndex].children[1].value=
+        tithing.toFixed(2);
+    }
+  }
+
   const expenses=state.expenses.reduce((s,e)=>s+num(e[1]),0);
   const bal=income-expenses;
 
