@@ -101,7 +101,53 @@
     <div class="row summary"><div class="label">Balance</div><div id="balance" class="calc money balance"></div></div>
   </div>
 
-  <div class="actions">
+  
+<div class="section">
+  <div class="section-title">PAYCHECK IMPORT</div>
+
+  <div style="padding:20px">
+    <button id="importPaycheckBtn" class="add-btn"
+            style="width:100%;padding:16px;font-size:18px;">
+      📷 Import Paycheck
+    </button>
+
+    <div id="paycheckImportStatus"
+         style="margin-top:12px;text-align:center;font-weight:600;">
+      Select a screenshot or photo of your paycheck.
+    </div>
+
+    <div id="paycheckPreview"
+         style="display:none;margin-top:18px;">
+
+      <div class="row">
+        <div class="label">Detected gross pay</div>
+        <input id="importGross" type="number" step="0.01">
+      </div>
+
+      <div class="row">
+        <div class="label">Detected net pay</div>
+        <input id="importNet" type="number" step="0.01">
+      </div>
+
+      <div class="row">
+        <div class="label">Detected regular hours</div>
+        <input id="importRegularHours" type="number" step="0.01">
+      </div>
+
+      <div class="row">
+        <div class="label">Detected overtime hours</div>
+        <input id="importOtHours" type="number" step="0.01">
+      </div>
+
+      <button id="applyPaycheckBtn" class="add-btn"
+              style="width:100%;margin-top:14px;padding:14px;">
+        Apply Paycheck
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="actions">
     <button id="exportBtn">Export Backup</button>
     <button id="resetBtn">Reset</button>
   </div>
@@ -220,6 +266,91 @@ function applyCloudState(json){
     console.error("Cloud sync error", err);
   }
 }
+
+
+function paycheckNumber(text, patterns){
+  for(const pattern of patterns){
+    const match=text.match(pattern);
+    if(match && match[1]){
+      const n=Number(match[1].replace(/,/g,""));
+      if(Number.isFinite(n)) return n;
+    }
+  }
+  return null;
+}
+
+function handlePaycheckOcr(text){
+  console.log("PAYCHECK OCR:",text);
+
+  const cleaned=text
+    .replace(/\$/g,"")
+    .replace(/[ \t]+/g," ");
+
+  const gross=paycheckNumber(cleaned,[
+    /gross\s*(?:pay|earnings)?[^0-9]{0,25}([0-9,]+\.\d{2})/i,
+    /current\s*gross[^0-9]{0,25}([0-9,]+\.\d{2})/i
+  ]);
+
+  const net=paycheckNumber(cleaned,[
+    /net\s*(?:pay|amount)?[^0-9]{0,25}([0-9,]+\.\d{2})/i,
+    /take\s*home[^0-9]{0,25}([0-9,]+\.\d{2})/i
+  ]);
+
+  const regular=paycheckNumber(cleaned,[
+    /regular[^0-9]{0,25}([0-9]+\.\d{1,2})/i,
+    /straight\s*time[^0-9]{0,25}([0-9]+\.\d{1,2})/i
+  ]);
+
+  const overtime=paycheckNumber(cleaned,[
+    /overtime[^0-9]{0,25}([0-9]+\.\d{1,2})/i,
+    /\bot\b[^0-9]{0,25}([0-9]+\.\d{1,2})/i
+  ]);
+
+  $("importGross").value=gross ?? "";
+  $("importNet").value=net ?? "";
+  $("importRegularHours").value=regular ?? "";
+  $("importOtHours").value=overtime ?? "";
+
+  $("paycheckPreview").style.display="block";
+
+  const found=[gross,net,regular,overtime]
+    .filter(v=>v!==null).length;
+
+  $("paycheckImportStatus").textContent=
+    "Paycheck read — "+found+
+    " fields detected. Review before applying.";
+}
+
+$("importPaycheckBtn").onclick=()=>{
+  $("paycheckImportStatus").textContent="Choose your paycheck image…";
+
+  if(window.Android && Android.importPaycheck){
+    Android.importPaycheck();
+  }else{
+    $("paycheckImportStatus").textContent=
+      "Paycheck import is only available in the Android app.";
+  }
+};
+
+$("applyPaycheckBtn").onclick=()=>{
+  const regular=num($("importRegularHours").value);
+  const overtime=num($("importOtHours").value);
+  const net=num($("importNet").value);
+
+  if(regular>0) state.w1base=regular;
+  if(overtime>0) state.w1ot=overtime;
+
+  if(net>0){
+    state.paycheck=net;
+  }
+
+  save();
+  calc();
+
+  $("paycheckImportStatus").textContent=
+    "✓ Paycheck applied to budget.";
+};
+
 
 renderExpenses(); calc();
 

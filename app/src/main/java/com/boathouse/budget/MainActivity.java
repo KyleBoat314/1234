@@ -2,12 +2,13 @@ package com.boathouse.budget;
 
 import android.app.Activity;
 import android.content.ContentValues;
+import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.text.InputType;
 import android.view.Gravity;
-import android.view.View;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -24,6 +25,11 @@ import com.google.firebase.firestore.DocumentReference;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.ListenerRegistration;
 
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.TextRecognition;
+import com.google.mlkit.vision.text.TextRecognizer;
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
+
 import org.json.JSONObject;
 
 import java.io.OutputStream;
@@ -32,6 +38,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class MainActivity extends Activity {
+
+    private static final int REQUEST_PICK_PAYCHECK = 1001;
 
     private WebView webView;
     private FirebaseAuth auth;
@@ -69,13 +77,17 @@ public class MainActivity extends Activity {
 
         EditText email = new EditText(this);
         email.setHint("Email");
-        email.setInputType(InputType.TYPE_CLASS_TEXT |
-                InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        email.setInputType(
+                InputType.TYPE_CLASS_TEXT |
+                InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+        );
 
         EditText password = new EditText(this);
         password.setHint("Password");
-        password.setInputType(InputType.TYPE_CLASS_TEXT |
-                InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        password.setInputType(
+                InputType.TYPE_CLASS_TEXT |
+                InputType.TYPE_TEXT_VARIATION_PASSWORD
+        );
 
         Button signIn = new Button(this);
         signIn.setText("Sign In");
@@ -84,7 +96,9 @@ public class MainActivity extends Activity {
         createAccount.setText("Create Account");
 
         TextView info = new TextView(this);
-        info.setText("\nUse the same Boat House Budget account on both phones to share one budget.");
+        info.setText(
+                "\nUse the same Boat House Budget account on both phones to share one budget."
+        );
         info.setGravity(Gravity.CENTER);
         info.setTextColor(Color.DKGRAY);
 
@@ -174,6 +188,7 @@ public class MainActivity extends Activity {
                     } else {
                         saveToCloud(localJson);
                     }
+
                     startBudgetListener();
                 })
                 .addOnFailureListener(error -> {
@@ -193,6 +208,7 @@ public class MainActivity extends Activity {
             }
 
             String json = snapshot.getString("json");
+
             if (json != null) {
                 sendCloudToWeb(json);
             }
@@ -200,7 +216,9 @@ public class MainActivity extends Activity {
     }
 
     private void saveToCloud(String json) {
-        if (budgetRef == null || json == null) return;
+        if (budgetRef == null || json == null) {
+            return;
+        }
 
         Map<String, Object> data = new HashMap<>();
         data.put("json", json);
@@ -212,13 +230,89 @@ public class MainActivity extends Activity {
     }
 
     private void sendCloudToWeb(String json) {
-        if (webView == null || json == null) return;
+        if (webView == null || json == null) {
+            return;
+        }
 
         String quoted = JSONObject.quote(json);
 
         runOnUiThread(() ->
                 webView.evaluateJavascript(
                         "applyCloudState(" + quoted + ");",
+                        null
+                )
+        );
+    }
+
+    private void choosePaycheckImage() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        startActivityForResult(intent, REQUEST_PICK_PAYCHECK);
+    }
+
+    @Override
+    protected void onActivityResult(
+            int requestCode,
+            int resultCode,
+            Intent data
+    ) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode != REQUEST_PICK_PAYCHECK ||
+                resultCode != RESULT_OK ||
+                data == null ||
+                data.getData() == null) {
+            return;
+        }
+
+        Uri imageUri = data.getData();
+
+        try {
+            InputImage image = InputImage.fromFilePath(this, imageUri);
+
+            TextRecognizer recognizer =
+                    TextRecognition.getClient(
+                            TextRecognizerOptions.DEFAULT_OPTIONS
+                    );
+
+            toast("Reading paycheck...");
+
+            recognizer.process(image)
+                    .addOnSuccessListener(result -> {
+                        String text = result.getText();
+
+                        recognizer.close();
+
+                        if (text == null || text.trim().isEmpty()) {
+                            toast("No text was found in that image.");
+                            return;
+                        }
+
+                        sendPaycheckTextToWeb(text);
+                    })
+                    .addOnFailureListener(error -> {
+                        recognizer.close();
+                        toast("Could not read paycheck: " + error.getMessage());
+                    });
+
+        } catch (Exception e) {
+            toast("Could not open image: " + e.getMessage());
+        }
+    }
+
+    private void sendPaycheckTextToWeb(String text) {
+        if (webView == null) {
+            return;
+        }
+
+        String quoted = JSONObject.quote(text);
+
+        runOnUiThread(() ->
+                webView.evaluateJavascript(
+                        "handlePaycheckOcr(" + quoted + ");",
                         null
                 )
         );
@@ -238,23 +332,37 @@ public class MainActivity extends Activity {
         if (budgetListener != null) {
             budgetListener.remove();
         }
+
         super.onDestroy();
     }
 
     private void toast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        Toast.makeText(
+                this,
+                message,
+                Toast.LENGTH_LONG
+        ).show();
     }
 
     public class AndroidBridge {
 
         @JavascriptInterface
         public void appReady(String json) {
-            runOnUiThread(() -> initializeCloud(json));
+            runOnUiThread(() ->
+                    initializeCloud(json)
+            );
         }
 
         @JavascriptInterface
         public void syncBudget(String json) {
             saveToCloud(json);
+        }
+
+        @JavascriptInterface
+        public void importPaycheck() {
+            runOnUiThread(() ->
+                    choosePaycheckImage()
+            );
         }
 
         @JavascriptInterface
@@ -275,38 +383,65 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 try {
                     ContentValues values = new ContentValues();
+
                     values.put(
                             MediaStore.Downloads.DISPLAY_NAME,
                             "boat-house-budget-backup.json"
                     );
+
                     values.put(
                             MediaStore.Downloads.MIME_TYPE,
                             "application/json"
                     );
-                    values.put(MediaStore.Downloads.IS_PENDING, 1);
 
-                    android.net.Uri uri = getContentResolver().insert(
+                    values.put(
+                            MediaStore.Downloads.IS_PENDING,
+                            1
+                    );
+
+                    Uri uri = getContentResolver().insert(
                             MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                             values
                     );
 
                     if (uri == null) {
-                        throw new Exception("Could not create download.");
+                        throw new Exception(
+                                "Could not create download."
+                        );
                     }
 
                     try (OutputStream out =
-                                 getContentResolver().openOutputStream(uri)) {
-                        out.write(json.getBytes(StandardCharsets.UTF_8));
+                                 getContentResolver()
+                                         .openOutputStream(uri)) {
+
+                        out.write(
+                                json.getBytes(
+                                        StandardCharsets.UTF_8
+                                )
+                        );
                     }
 
                     values.clear();
-                    values.put(MediaStore.Downloads.IS_PENDING, 0);
-                    getContentResolver().update(uri, values, null, null);
+
+                    values.put(
+                            MediaStore.Downloads.IS_PENDING,
+                            0
+                    );
+
+                    getContentResolver().update(
+                            uri,
+                            values,
+                            null,
+                            null
+                    );
 
                     toast("Backup saved to Downloads");
 
                 } catch (Exception e) {
-                    toast("Backup failed: " + e.getMessage());
+                    toast(
+                            "Backup failed: " +
+                            e.getMessage()
+                    );
                 }
             });
         }
