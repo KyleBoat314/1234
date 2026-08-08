@@ -254,8 +254,24 @@ function renderExpenses(){
       <input aria-label="Expense amount" type="number" step="0.01" value="${e[1]}">
       <button class="remove" aria-label="Remove expense">×</button>`;
     const [name,amount,remove]=row.children;
-    name.addEventListener("input",()=>{state.expenses[i][0]=name.value;save();});
-    amount.addEventListener("input",()=>{state.expenses[i][1]=num(amount.value);save();calc();});
+    name.addEventListener("input",()=>{
+      state.expenses[i][0]=name.value;
+    });
+
+    name.addEventListener("change",()=>{
+      state.expenses[i][0]=name.value;
+      save();
+    });
+    amount.addEventListener("input",()=>{
+      state.expenses[i][1]=num(amount.value);
+      calc();
+    });
+
+    amount.addEventListener("change",()=>{
+      state.expenses[i][1]=num(amount.value);
+      save();
+      calc();
+    });
     remove.addEventListener("click",()=>{state.expenses.splice(i,1);save();renderExpenses();calc();});
     box.appendChild(row);
   });
