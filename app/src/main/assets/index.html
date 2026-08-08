@@ -102,6 +102,7 @@
   </div>
 
   
+
 <div class="section">
   <div class="section-title">PAYCHECK IMPORT</div>
 
@@ -120,29 +121,65 @@
          style="display:none;margin-top:18px;">
 
       <div class="row">
-        <div class="label">Detected gross pay</div>
-        <input id="importGross" type="number" step="0.01">
-      </div>
-
-      <div class="row">
-        <div class="label">Detected net pay</div>
-        <input id="importNet" type="number" step="0.01">
-      </div>
-
-      <div class="row">
-        <div class="label">Detected regular hours</div>
+        <div class="label">Regular hours</div>
         <input id="importRegularHours" type="number" step="0.01">
       </div>
 
       <div class="row">
-        <div class="label">Detected overtime hours</div>
+        <div class="label">Overtime hours</div>
         <input id="importOtHours" type="number" step="0.01">
+      </div>
+
+      <div class="row">
+        <div class="label">Double-time hours</div>
+        <input id="importDtHours" type="number" step="0.01">
+      </div>
+
+      <div class="row">
+        <div class="label">Vacation hours</div>
+        <input id="importVacationHours" type="number" step="0.01">
+      </div>
+
+      <div class="row">
+        <div class="label">OT adjustment hours</div>
+        <input id="importAdjustmentHours" type="number" step="0.01">
+      </div>
+
+      <div class="row">
+        <div class="label">Total hours</div>
+        <input id="importTotalHours" type="number" step="0.01">
+      </div>
+
+      <div class="row">
+        <div class="label">Gross pay</div>
+        <input id="importGross" type="number" step="0.01">
+      </div>
+
+      <div class="row">
+        <div class="label">Taxes</div>
+        <input id="importTaxes" type="number" step="0.01">
+      </div>
+
+      <div class="row">
+        <div class="label">Deductions</div>
+        <input id="importDeductions" type="number" step="0.01">
+      </div>
+
+      <div class="row">
+        <div class="label">Net pay</div>
+        <input id="importNet" type="number" step="0.01">
       </div>
 
       <button id="applyPaycheckBtn" class="add-btn"
               style="width:100%;margin-top:14px;padding:14px;">
         Apply Paycheck
       </button>
+
+      <details style="margin-top:18px;">
+        <summary style="font-weight:700;">View detected paycheck text</summary>
+        <pre id="paycheckRawText"
+             style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;"></pre>
+      </details>
     </div>
   </div>
 </div>
@@ -207,7 +244,13 @@ function calc(){
   const bw=base*(state.w1base+state.w2base);
   const ow=ot*(state.w1ot+state.w2ot);
   const dw=dt*(state.w1dt+state.w2dt);
-  const gross=bw+ow+dw, net=gross*(state.takeHome/100);
+  const calculatedGross=bw+ow+dw;
+  const gross=(Number(state.importedGross)||0)>0
+    ? Number(state.importedGross)
+    : calculatedGross;
+  const net=(Number(state.importedNet)||0)>0
+    ? Number(state.importedNet)
+    : gross*(state.takeHome/100);
   const income=net+state.childSupport;
   const expenses=state.expenses.reduce((s,e)=>s+num(e[1]),0);
   const bal=income-expenses;
@@ -268,6 +311,7 @@ function applyCloudState(json){
 }
 
 
+
 function paycheckNumber(text, patterns){
   for(const pattern of patterns){
     const match=text.match(pattern);
@@ -279,42 +323,176 @@ function paycheckNumber(text, patterns){
   return null;
 }
 
+function numbersIn(text){
+  return [...text.matchAll(/\b\d[\d,]*(?:\.\d+)?\b/g)]
+    .map(m=>Number(m[0].replace(/,/g,"")))
+    .filter(Number.isFinite);
+}
+
+/*
+ Boeing Hours & Earnings rows generally look like:
+ Description | Shift | Rate | Hours | Earnings
+
+ The hours number is therefore normally the
+ second-to-last numeric value in the row.
+*/
+function rowHours(lines, type){
+  let total=0;
+  let found=false;
+
+  for(const original of lines){
+    const line=original.trim();
+    const lower=line.toLowerCase();
+
+    let match=false;
+
+    if(type==="regular")
+      match=/^regular\s+hours\b/i.test(line);
+
+    if(type==="overtime")
+      match=/^overtime\b/i.test(line) &&
+            !/adjustment/i.test(line);
+
+    if(type==="double")
+      match=/^double\s*time\b/i.test(line);
+
+    if(type==="vacation")
+      match=/^vacation\b/i.test(line);
+
+    if(type==="adjustment")
+      match=/^overtime\s+adjustment\b/i.test(line);
+
+    if(!match) continue;
+
+    const nums=numbersIn(line);
+
+    if(nums.length>=2){
+      total+=nums[nums.length-2];
+      found=true;
+    }
+  }
+
+  return found ? Number(total.toFixed(2)) : null;
+}
+
 function handlePaycheckOcr(text){
   console.log("PAYCHECK OCR:",text);
 
+  $("paycheckRawText").textContent=text;
+
   const cleaned=text
     .replace(/\$/g,"")
-    .replace(/[ \t]+/g," ");
+    .replace(/\r/g,"");
+
+  const lines=cleaned
+    .split("\n")
+    .map(x=>x.trim())
+    .filter(Boolean);
+
+  let regular=rowHours(lines,"regular");
+  let overtime=rowHours(lines,"overtime");
+  let doubleTime=rowHours(lines,"double");
+  let vacation=rowHours(lines,"vacation");
+  let adjustment=rowHours(lines,"adjustment");
+
+  /*
+   Fallback searches for cases where OCR merges table cells
+   differently but keeps the row description near its values.
+  */
+  function fallbackHours(label){
+    const re=new RegExp(label+"[^\\n]{0,100}","ig");
+    const matches=[...cleaned.matchAll(re)];
+
+    let total=0;
+    let found=false;
+
+    for(const m of matches){
+      if(/overtime/i.test(label) &&
+         /adjustment/i.test(m[0]) &&
+         !/adjustment/i.test(label)) continue;
+
+      const nums=numbersIn(m[0]);
+
+      if(nums.length>=2){
+        total+=nums[nums.length-2];
+        found=true;
+      }
+    }
+
+    return found ? Number(total.toFixed(2)) : null;
+  }
+
+  if(regular===null)
+    regular=fallbackHours("regular\\s+hours");
+
+  if(overtime===null)
+    overtime=fallbackHours("overtime");
+
+  if(doubleTime===null)
+    doubleTime=fallbackHours("double\\s*time");
+
+  if(vacation===null)
+    vacation=fallbackHours("vacation");
+
+  if(adjustment===null)
+    adjustment=fallbackHours("overtime\\s+adjustment");
 
   const gross=paycheckNumber(cleaned,[
-    /gross\s*(?:pay|earnings)?[^0-9]{0,25}([0-9,]+\.\d{2})/i,
-    /current\s*gross[^0-9]{0,25}([0-9,]+\.\d{2})/i
+    /total\s+gross[\s\S]{0,80}?([0-9,]+\.\d{2})/i,
+    /gross\s*(?:pay|earnings)?[^0-9]{0,30}([0-9,]+\.\d{2})/i,
+    /current\s+gross[^0-9]{0,30}([0-9,]+\.\d{2})/i
   ]);
 
-  const net=paycheckNumber(cleaned,[
-    /net\s*(?:pay|amount)?[^0-9]{0,25}([0-9,]+\.\d{2})/i,
-    /take\s*home[^0-9]{0,25}([0-9,]+\.\d{2})/i
+  const taxes=paycheckNumber(cleaned,[
+    /total\s+taxes[\s\S]{0,80}?([0-9,]+\.\d{2})/i
   ]);
 
-  const regular=paycheckNumber(cleaned,[
-    /regular[^0-9]{0,25}([0-9]+\.\d{1,2})/i,
-    /straight\s*time[^0-9]{0,25}([0-9]+\.\d{1,2})/i
+  const deductions=paycheckNumber(cleaned,[
+    /total\s+deductions[\s\S]{0,80}?([0-9,]+\.\d{2})/i
   ]);
 
-  const overtime=paycheckNumber(cleaned,[
-    /overtime[^0-9]{0,25}([0-9]+\.\d{1,2})/i,
-    /\bot\b[^0-9]{0,25}([0-9]+\.\d{1,2})/i
+  let net=paycheckNumber(cleaned,[
+    /net\s+pay(?!\s+distribution)[\s\S]{0,100}?([0-9,]+\.\d{2})/i,
+    /take\s*home[^0-9]{0,30}([0-9,]+\.\d{2})/i
   ]);
 
-  $("importGross").value=gross ?? "";
-  $("importNet").value=net ?? "";
+  if(net===null &&
+     gross!==null &&
+     taxes!==null &&
+     deductions!==null){
+    net=Number((gross-taxes-deductions).toFixed(2));
+  }
+
+  const components=[
+    regular,
+    overtime,
+    doubleTime,
+    vacation,
+    adjustment
+  ];
+
+  const totalHours=components.some(v=>v!==null)
+    ? Number(components.reduce((a,v)=>a+(v||0),0).toFixed(2))
+    : null;
+
   $("importRegularHours").value=regular ?? "";
   $("importOtHours").value=overtime ?? "";
+  $("importDtHours").value=doubleTime ?? "";
+  $("importVacationHours").value=vacation ?? "";
+  $("importAdjustmentHours").value=adjustment ?? "";
+  $("importTotalHours").value=totalHours ?? "";
+  $("importGross").value=gross ?? "";
+  $("importTaxes").value=taxes ?? "";
+  $("importDeductions").value=deductions ?? "";
+  $("importNet").value=net ?? "";
 
   $("paycheckPreview").style.display="block";
 
-  const found=[gross,net,regular,overtime]
-    .filter(v=>v!==null).length;
+  const found=[
+    regular,overtime,doubleTime,vacation,
+    adjustment,totalHours,gross,taxes,
+    deductions,net
+  ].filter(v=>v!==null).length;
 
   $("paycheckImportStatus").textContent=
     "Paycheck read — "+found+
@@ -322,7 +500,8 @@ function handlePaycheckOcr(text){
 }
 
 $("importPaycheckBtn").onclick=()=>{
-  $("paycheckImportStatus").textContent="Choose your paycheck image…";
+  $("paycheckImportStatus").textContent=
+    "Choose your paycheck image…";
 
   if(window.Android && Android.importPaycheck){
     Android.importPaycheck();
@@ -335,14 +514,25 @@ $("importPaycheckBtn").onclick=()=>{
 $("applyPaycheckBtn").onclick=()=>{
   const regular=num($("importRegularHours").value);
   const overtime=num($("importOtHours").value);
+  const doubleTime=num($("importDtHours").value);
+  const gross=num($("importGross").value);
   const net=num($("importNet").value);
 
-  if(regular>0) state.w1base=regular;
-  if(overtime>0) state.w1ot=overtime;
+  /*
+   Imported hours represent the whole pay period.
+   Store them in Week 1 and clear Week 2 so they
+   are not counted twice.
+  */
+  state.w1base=regular;
+  state.w1ot=overtime;
+  state.w1dt=doubleTime;
 
-  if(net>0){
-    state.paycheck=net;
-  }
+  state.w2base=0;
+  state.w2ot=0;
+  state.w2dt=0;
+
+  state.importedGross=gross;
+  state.importedNet=net;
 
   save();
   calc();
