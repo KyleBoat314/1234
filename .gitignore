@@ -1,0 +1,5 @@
+
+# Android signing keys
+boathouse-release.p12
+boathouse-key.pem
+boathouse-cert.pem
