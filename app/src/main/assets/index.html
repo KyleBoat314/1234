@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#16324F" />
+  <link rel="manifest" href="manifest.json" />
+  <title>Boat House Budget</title>
+  <style>
+    :root{
+      --navy:#16324F; --blue:#2E5B84; --bg:#F5F7FA; --card:#FFFFFF;
+      --text:#1F2937; --muted:#64748B; --input:#FFF7D6; --calc:#EAF4EE;
+      --danger:#B42318; --dangerbg:#FDE8E7; --good:#18794E; --goodbg:#E7F6EC;
+      --border:#E5E7EB;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+    .app{max-width:640px;margin:0 auto;padding:0 12px 40px}
+    header{position:sticky;top:0;z-index:5;background:var(--navy);color:#fff;padding:16px 14px;margin:0 -12px 14px;box-shadow:0 2px 10px #0002}
+    header h1{font-size:22px;margin:0}
+    header p{font-size:12px;margin:4px 0 0;opacity:.82}
+    .section{background:var(--card);border-radius:16px;margin:14px 0;overflow:hidden;box-shadow:0 2px 10px #0000000d}
+    .section-title{background:var(--blue);color:#fff;font-weight:800;padding:12px 14px;letter-spacing:.4px}
+    .row{display:grid;grid-template-columns:1fr minmax(118px,150px);gap:10px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--border)}
+    .row:last-child{border-bottom:none}
+    .label{font-weight:600}
+    .subtle{color:var(--muted);font-size:12px;font-weight:500}
+    input{width:100%;font-size:18px;padding:11px 10px;border:1px solid #E8C75B;border-radius:10px;background:var(--input);text-align:right;font-weight:700;color:#7A4B00}
+    .calc{background:var(--calc);padding:11px 10px;border-radius:10px;text-align:right;font-weight:800;color:#1E5B3A}
+    .money::before{content:"$"}
+    .summary{background:#DCEBFA;color:var(--navy);font-size:18px}
+    .balance.negative{background:var(--dangerbg);color:var(--danger)}
+    .balance.positive{background:var(--goodbg);color:var(--good)}
+    .expense-row{grid-template-columns:1fr 132px 40px}
+    .expense-row input:first-child{text-align:left;color:var(--text);font-size:16px}
+    button{border:none;border-radius:10px;padding:10px 12px;font-weight:800}
+    .add-btn{display:block;width:calc(100% - 28px);margin:12px 14px;background:var(--navy);color:white;font-size:16px}
+    .remove{background:#F3F4F6;color:#555;padding:9px 0}
+    .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0}
+    .actions button{background:#fff;border:1px solid var(--border);color:var(--navy)}
+    .note{font-size:12px;color:var(--muted);padding:0 2px}
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Boat House Budget</h1>
+    <p>Paycheck + expense tracker • saves automatically on this device</p>
+  </header>
+
+  <div class="section">
+    <div class="section-title">PAY SETTINGS</div>
+    <div class="row"><div class="label">Base hourly rate</div><input id="baseRate" type="number" step="0.01"></div>
+    <div class="row"><div class="label">Overtime rate</div><div id="otRate" class="calc"></div></div>
+    <div class="row"><div class="label">Double-time rate</div><div id="dtRate" class="calc"></div></div>
+    <div class="row"><div class="label">Estimated take-home %</div><input id="takeHome" type="number" step="0.01"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">WEEK 1 HOURS</div>
+    <div class="row"><div class="label">Base hours</div><input id="w1base" type="number" step="0.25"></div>
+    <div class="row"><div class="label">Overtime hours</div><input id="w1ot" type="number" step="0.25"></div>
+    <div class="row"><div class="label">Double-time hours</div><input id="w1dt" type="number" step="0.25"></div>
+    <div class="row"><div class="label">Week 1 total</div><div id="w1total" class="calc"></div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">WEEK 2 HOURS</div>
+    <div class="row"><div class="label">Base hours</div><input id="w2base" type="number" step="0.25"></div>
+    <div class="row"><div class="label">Overtime hours</div><input id="w2ot" type="number" step="0.25"></div>
+    <div class="row"><div class="label">Double-time hours</div><input id="w2dt" type="number" step="0.25"></div>
+    <div class="row"><div class="label">Week 2 total</div><div id="w2total" class="calc"></div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">PAY SUMMARY</div>
+    <div class="row"><div class="label">Base wages</div><div id="baseWages" class="calc money"></div></div>
+    <div class="row"><div class="label">Overtime wages</div><div id="otWages" class="calc money"></div></div>
+    <div class="row"><div class="label">Double-time wages</div><div id="dtWages" class="calc money"></div></div>
+    <div class="row summary"><div class="label">Gross pay</div><div id="gross" class="calc money"></div></div>
+    <div class="row summary"><div class="label">Estimated net pay</div><div id="net" class="calc money"></div></div>
+    <div class="row"><div class="label">Total hours</div><div id="hours" class="calc"></div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">INCOME</div>
+    <div class="row"><div class="label">Paycheck</div><div id="paycheck" class="calc money"></div></div>
+    <div class="row"><div class="label">Child Support</div><input id="childSupport" type="number" step="0.01"></div>
+    <div class="row summary"><div class="label">Total Income</div><div id="totalIncome" class="calc money"></div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">EXPENSES</div>
+    <div id="expenses"></div>
+    <button class="add-btn" id="addExpense">+ Add Expense</button>
+  </div>
+
+  <div class="section">
+    <div class="section-title">TOTALS</div>
+    <div class="row summary"><div class="label">Total Expenses</div><div id="totalExpenses" class="calc money"></div></div>
+    <div class="row summary"><div class="label">Balance</div><div id="balance" class="calc money balance"></div></div>
+  </div>
+
+  <div class="actions">
+    <button id="exportBtn">Export Backup</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+  <div class="note">This version stores your data locally on your phone/browser. No account or internet connection is required after installation.</div>
+</div>
+
+<script>
+const defaults = {
+  baseRate:40.25,takeHome:84.57,w1base:24,w1ot:0,w1dt:0,w2base:50,w2ot:8,w2dt:12,childSupport:230,
+  expenses:[
+    ["Tithing",442.75],["Mortgage",2742.97],["T-Mobile",410.05],["Electricity",197.15],
+    ["City of ML (water, sewage, garbage)",322.49],["Localtel (internet)",118.76],
+    ["Cascade Natural Gas",6.38],["ADT (alarm)",76.97],["Progressive (car insurance)",115],
+    ["Feller Orthodontics",175],["Bank of America (credit card)",50],["Ticket",50]
+  ]
+};
+let state = JSON.parse(localStorage.getItem("boatHouseBudgetState")||"null") || structuredClone(defaults);
+
+const $=id=>document.getElementById(id);
+const num=v=>Number(v)||0;
+const money=v=>num(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+
+function save(){ localStorage.setItem("boatHouseBudgetState",JSON.stringify(state)); }
+
+function bind(id,key){
+  $(id).value=state[key];
+  $(id).addEventListener("input",()=>{state[key]=num($(id).value);save();calc();});
+}
+["baseRate","takeHome","w1base","w1ot","w1dt","w2base","w2ot","w2dt","childSupport"].forEach(id=>bind(id,id));
+
+function renderExpenses(){
+  const box=$("expenses"); box.innerHTML="";
+  state.expenses.forEach((e,i)=>{
+    const row=document.createElement("div"); row.className="row expense-row";
+    row.innerHTML=`<input aria-label="Expense name" value="${String(e[0]).replaceAll('"','&quot;')}">
+      <input aria-label="Expense amount" type="number" step="0.01" value="${e[1]}">
+      <button class="remove" aria-label="Remove expense">×</button>`;
+    const [name,amount,remove]=row.children;
+    name.addEventListener("input",()=>{state.expenses[i][0]=name.value;save();});
+    amount.addEventListener("input",()=>{state.expenses[i][1]=num(amount.value);save();calc();});
+    remove.addEventListener("click",()=>{state.expenses.splice(i,1);save();renderExpenses();calc();});
+    box.appendChild(row);
+  });
+}
+$("addExpense").onclick=()=>{state.expenses.push(["",0]);save();renderExpenses();setTimeout(()=>window.scrollBy(0,120),30);};
+
+function calc(){
+  const base=state.baseRate, ot=base*1.5, dt=base*2;
+  const w1=state.w1base+state.w1ot+state.w1dt, w2=state.w2base+state.w2ot+state.w2dt;
+  const bw=base*(state.w1base+state.w2base);
+  const ow=ot*(state.w1ot+state.w2ot);
+  const dw=dt*(state.w1dt+state.w2dt);
+  const gross=bw+ow+dw, net=gross*(state.takeHome/100);
+  const income=net+state.childSupport;
+  const expenses=state.expenses.reduce((s,e)=>s+num(e[1]),0);
+  const bal=income-expenses;
+
+  $("otRate").textContent="$"+money(ot); $("dtRate").textContent="$"+money(dt);
+  $("w1total").textContent=w1.toFixed(2); $("w2total").textContent=w2.toFixed(2);
+  $("baseWages").textContent=money(bw); $("otWages").textContent=money(ow); $("dtWages").textContent=money(dw);
+  $("gross").textContent=money(gross); $("net").textContent=money(net); $("hours").textContent=(w1+w2).toFixed(2);
+  $("paycheck").textContent=money(net); $("totalIncome").textContent=money(income);
+  $("totalExpenses").textContent=money(expenses); $("balance").textContent=money(bal);
+  $("balance").classList.toggle("negative",bal<0); $("balance").classList.toggle("positive",bal>=0);
+}
+
+$("exportBtn").onclick=()=>{
+  const data=JSON.stringify(state,null,2);
+  if(window.Android && Android.saveBackup){ Android.saveBackup(data); }
+  else {
+    const blob=new Blob([data],{type:"application/json"});
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="boat-house-budget-backup.json"; a.click();
+    URL.revokeObjectURL(a.href);
+  }
+};
+$("resetBtn").onclick=()=>{
+  if(confirm("Reset all values to the original defaults?")){state=structuredClone(defaults);save();location.reload();}
+};
+
+renderExpenses(); calc();
+
+</script>
+</body>
+</html>
