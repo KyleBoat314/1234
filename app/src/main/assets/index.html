@@ -503,6 +503,7 @@ function parseBoeingBaseRate(text){
 }
 
 
+
 function parseBoeingEarnings(text){
   const lines=text
     .replace(/\r/g,"")
@@ -520,7 +521,7 @@ function parseBoeingEarnings(text){
   ];
 
   // -------- Rates --------
-  let rates=[];
+  let rawRates=[];
 
   const rateIndex=lines.findIndex(x=>/^rate$/i.test(x));
 
@@ -533,11 +534,42 @@ function parseBoeingEarnings(text){
 
       if(/^\d+\.\d{4,6}$/.test(line)){
         const n=Number(line);
-        if(Number.isFinite(n)) rates.push(n);
+        if(Number.isFinite(n)) rawRates.push(n);
       }
 
-      if(rates.length>=6) break;
+      if(rawRates.length>=8) break;
     }
+  }
+
+  /*
+    Expected Boeing order:
+      Regular old rate
+      Regular current rate
+      Vacation current rate
+      Overtime rate
+      Double-time rate
+      OT adjustment rate
+
+    Some OCR runs collapse the duplicate current rate.
+    Rebuild the 6-row rate array if that happens.
+  */
+  let rates=[];
+
+  if(rawRates.length>=6){
+    rates=rawRates.slice(0,6);
+  }
+  else if(rawRates.length===5){
+    rates=[
+      rawRates[0],
+      rawRates[1],
+      rawRates[1],
+      rawRates[2],
+      rawRates[3],
+      rawRates[4]
+    ];
+  }
+  else{
+    rates=rawRates.slice();
   }
 
   // -------- Hours --------
@@ -561,17 +593,6 @@ function parseBoeingEarnings(text){
     }
   }
 
-  /*
-    OCR normally gives:
-      8.0
-      38.6
-      1.4
-      11.9
-      8.0
-      68.9
-
-    68.9 is TOTAL, so adjustment hours are absent.
-  */
   let totalHours=null;
   let hours=[];
 
@@ -589,17 +610,6 @@ function parseBoeingEarnings(text){
   }
 
   // -------- Earnings --------
-  /*
-    ML Kit is reading the earnings amounts at the start
-    of lines such as:
-
-      304.00Fed Medicare
-      1,553.65|Fed Social Sec
-      56.35 WA FLVEE
-      718.46 WA LTO/EE
-      644.00WA MLVEE
-      59.27 WA WA INDUSTRIAL
-  */
   let earnings=[];
 
   const earningsDescIndex=lines.findIndex(
@@ -631,10 +641,6 @@ function parseBoeingEarnings(text){
     let hrs=hours[i] ?? null;
     const earn=earnings[i] ?? null;
 
-    /*
-      OT Adjustment hour may be missed by OCR.
-      If rate and earnings are present, safely infer it.
-    */
     if(i===5 && hrs===null && rate && earn){
       const inferred=earn/rate;
 
